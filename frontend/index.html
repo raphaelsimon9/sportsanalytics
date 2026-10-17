@@ -610,26 +610,31 @@
       return res;
     }
 
+    // ==========================================
+    // FIXED STATISTICAL ENGINE & DATE ROUTINE
+    // ==========================================
     function generateDataForDate(sport, dateStr) {
       const leagues = sport === 'football' ? GLOBAL_FOOTBALL_LEAGUES : GLOBAL_BASKETBALL_LEAGUES;
       const results = [];
       
-      // Deterministic seed generation based on date and index for consistency
-      const seedNum = dateStr.split('-').join('');
+      const dateNum = parseInt(dateStr.split('-').join(''), 10);
 
       leagues.forEach((lg, lgIdx) => {
-        // Generate 2 to 4 matches per league for the selected day
-        const matchCount = ((parseInt(seedNum) + lgIdx) % 3) + 2; 
-        const teamPool = TEAMS_BY_LEAGUE[lg.id] || [`Team A (${lg.id})`, `Team B (${lg.id})`, `Team C (${lg.id})`, `Team D (${lg.id})`];
+        const matchCount = ((dateNum + lgIdx) % 3) + 2; 
+        const teamPool = TEAMS_BY_LEAGUE[lg.id] || [`${lg.name} Club A`, `${lg.name} Club B`, `${lg.name} Club C`, `${lg.name} Club D`, `${lg.name} Club E`, `${lg.name} Club F`];
 
         for (let i = 0; i < matchCount; i++) {
-          const homeIdx = (i * 2) % teamPool.length;
-          const awayIdx = (i * 2 + 1) % teamPool.length;
-          const homeTeam = teamPool[homeIdx] || `Home FC ${i+1}`;
-          const awayTeam = teamPool[awayIdx] || `Away FC ${i+1}`;
+          const homeIdx = (dateNum + i * 2) % teamPool.length;
+          const awayIdx = (dateNum + i * 2 + 1) % teamPool.length;
+          if (homeIdx === awayIdx) continue;
+          
+          const homeTeam = teamPool[homeIdx];
+          const awayTeam = teamPool[awayIdx];
+          
+          const matchHour = 13 + (i * 2) % 9;
+          const matchTimeStr = `${dateStr} ${matchHour < 10 ? '0' : ''}${matchHour}:00`;
 
           if (sport === 'football') {
-            // xG calculation parameters
             const homeAtt = 1.1 + ((lgIdx + i) % 5) * 0.2;
             const awayAtt = 0.9 + ((lgIdx + i + 1) % 4) * 0.2;
             const homeDef = 0.8 + ((i) % 3) * 0.2;
@@ -638,7 +643,6 @@
             const homeXg = parseFloat((homeAtt * awayDef * 1.2).toFixed(2));
             const awayXg = parseFloat((awayAtt * homeDef * 0.9).toFixed(2));
 
-            // Poisson 1X2 Probabilities
             let homeWinP = 0, drawP = 0, awayWinP = 0;
             for (let h = 0; h <= 6; h++) {
               for (let a = 0; a <= 6; a++) {
@@ -654,24 +658,20 @@
             const drawProb = Math.round((drawP / totalP) * 100);
             const awayProb = Math.min(99, 100 - homeProb - drawProb);
 
-            // Goals Over/Under Projections
             const expGoals = homeXg + awayXg;
             const over1_5 = Math.min(95, Math.max(25, Math.round((1 - (calculatePoissonProb(0, expGoals) + calculatePoissonProb(1, expGoals))) * 100)));
             const over2_5 = Math.min(90, Math.max(15, Math.round((1 - (calculatePoissonProb(0, expGoals) + calculatePoissonProb(1, expGoals) + calculatePoissonProb(2, expGoals))) * 100)));
             const over3_5 = Math.max(5, Math.round(over2_5 * 0.55));
             const over4_5 = Math.max(2, Math.round(over3_5 * 0.4));
 
-            // Corners & Shots
             const cornersExp = parseFloat((8.5 + (expGoals * 1.4)).toFixed(1));
             const cornersOver9_5 = Math.min(88, Math.max(30, Math.round(cornersExp * 8)));
             
             const shotsExp = parseFloat((21 + (expGoals * 3)).toFixed(1));
             const shotsOver22_5 = Math.min(85, Math.max(35, Math.round(shotsExp * 3.2)));
 
-            // Recommendation Logic
             let recommendation = "";
             let confidence = "MEDIUM";
-            let bestVal = Math.max(homeProb, awayProb, over2_5);
 
             if (homeProb >= 65) { recommendation = `Home Win (${homeTeam})`; confidence = "HIGH"; }
             else if (awayProb >= 65) { recommendation = `Away Win (${awayTeam})`; confidence = "HIGH"; }
@@ -687,20 +687,16 @@
               leagueName: lg.name,
               country: lg.country,
               flag: lg.flag,
-              date: `${dateStr} ${14 + i}:00`,
+              date: matchTimeStr,
               homeTeam, awayTeam,
               homeProb, drawProb, awayProb,
               homeXg, awayXg,
               over1_5, over2_5, over3_5, over4_5,
               cornersExp, cornersOver9_5,
               shotsExp, shotsOver22_5,
-              recommendation, confidence,
-              homeForm: [60 + (i*5)%35, 70, 80],
-              awayForm: [50 + (i*7)%40, 65, 55]
+              recommendation, confidence
             });
-
           } else {
-            // Basketball Analytical Model
             const homePpts = 108 + ((lgIdx + i) % 8) * 3;
             const awayPpts = 104 + ((lgIdx + i + 2) % 7) * 3;
             const projectedTotal = homePpts + awayPpts;
@@ -723,7 +719,7 @@
               leagueName: lg.name,
               country: lg.country,
               flag: lg.flag,
-              date: `${dateStr} ${18 + i}:30`,
+              date: matchTimeStr,
               homeTeam, awayTeam,
               homeProb, awayProb,
               projectedTotal,
@@ -796,7 +792,6 @@
       const confidenceFilter = document.getElementById('confidence-filter').value;
       const searchQuery = document.getElementById('search-input').value.toLowerCase();
 
-      // Filter Logic
       const filtered = rawMatches.filter(m => {
         if (selectedCountry !== 'ALL' && m.country !== selectedCountry) return false;
         if (leagueFilter !== 'ALL' && m.leagueId !== leagueFilter) return false;
@@ -833,20 +828,19 @@
 
       return `
         <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs hover:shadow-md transition-shadow flex flex-col justify-between">
-          
-          <!-- Top Row: Flag, League, Date -->
           <div>
             <div class="flex items-center justify-between text-xs mb-3">
               <div class="flex items-center gap-1.5 font-bold text-slate-600 dark:text-slate-300">
                 <span>${m.flag}</span>
-                <span class="truncate max-w-[150px]">${m.leagueName}</span>
+                <span class="truncate max-w-[130px]">${m.leagueName}</span>
               </div>
-              <span class="text-[11px] font-medium text-slate-400 dark:text-slate-500">${m.date.split(' ')[1]}</span>
+              <span class="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800/60">
+                ${m.date}
+              </span>
             </div>
 
             <!-- Teams & Win Probabilities -->
             <div class="space-y-2 mb-4">
-              <!-- Home Team -->
               <div class="flex justify-between items-center">
                 <span class="font-black text-sm text-slate-800 dark:text-white truncate">${m.homeTeam}</span>
                 <div class="flex items-center gap-2">
@@ -858,14 +852,12 @@
               </div>
 
               ${isFb ? `
-              <!-- Draw Row for Football -->
               <div class="flex justify-between items-center text-xs text-slate-400">
                 <span>Draw Likelihood</span>
                 <span class="font-semibold text-slate-500">${m.drawProb}%</span>
               </div>
               ` : ''}
 
-              <!-- Away Team -->
               <div class="flex justify-between items-center">
                 <span class="font-black text-sm text-slate-800 dark:text-white truncate">${m.awayTeam}</span>
                 <div class="flex items-center gap-2">
@@ -941,7 +933,6 @@
               <i data-lucide="${isSaved ? 'bookmark-check' : 'bookmark'}" class="w-4 h-4"></i>
             </button>
           </div>
-
         </div>
       `;
     }
